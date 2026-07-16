@@ -80,6 +80,13 @@ def collect_all_regions_with_delay() -> list:
     return all_items
 
 
+CONTENT_TYPE_NAMES = {
+    "12": "관광지", "14": "문화시설", "15": "축제공연행사",
+    "25": "여행코스", "28": "레포츠", "32": "숙박",
+    "38": "쇼핑", "39": "음식점",
+}
+
+
 def map_row(item: dict, lcls_map: dict, sigungu_map: dict) -> dict:
     area_code = str(item.get("areacode", "") or "")
     sigungu_code = str(item.get("sigungucode", "") or "")
@@ -90,10 +97,11 @@ def map_row(item: dict, lcls_map: dict, sigungu_map: dict) -> dict:
         "name": item.get("title"),
         "address": item.get("addr1"),
         "image": item.get("firstimage"),
-        "category": item.get("contenttypeid"),
-        "lcls1_name": lcls_map.get(item.get("cat1"), item.get("cat1")),
-        "lcls2_name": lcls_map.get(item.get("cat2"), item.get("cat2")),
-        "lcls3_name": lcls_map.get(item.get("cat3"), item.get("cat3")),
+        "category": CONTENT_TYPE_NAMES.get(item.get("contenttypeid"), "기타"),
+        # 주의: lclsSystm1/2/3 (신분류체계) 코드로 조회해야 함. cat1/2/3(구분류체계)은 다른 코드 체계라 매핑 실패함.
+        "lcls1_name": lcls_map.get(item.get("lclsSystm1"), "미분류"),
+        "lcls2_name": lcls_map.get(item.get("lclsSystm2"), "미분류"),
+        "lcls3_name": lcls_map.get(item.get("lclsSystm3"), "미분류"),
         "area_code": area_code,
         "sigungu_name": sigungu_map.get(sigungu_key, sigungu_code),
         # TourAPI 기준 mapy=위도(lat), mapx=경도(lng)
