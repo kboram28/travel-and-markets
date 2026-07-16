@@ -8,10 +8,30 @@ import os
 import requests
 from dotenv import load_dotenv
 
-load_dotenv("../.env")  # 프로젝트 루트의 .env 사용 (notebooks/에서 실행 기준)
+# 이 파일(src/collect/tourism_collector.py)의 위치를 기준으로 프로젝트 루트를 찾아
+# .env를 로드한다. 실행 위치(cwd)가 어디든(프로젝트 루트에서 실행하든,
+# notebooks/에서 실행하든, src/collect/ 안에서 실행하든) 항상 같은 .env를 찾는다.
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_ENV_PATH = os.path.join(_PROJECT_ROOT, ".env")
+load_dotenv(_ENV_PATH)
 
 SERVICE_KEY = os.getenv("SERVICE_KEY")
 TOUR_BASE_URL = "https://apis.data.go.kr/B551011/KorService2"
+
+if not SERVICE_KEY:
+    print(f"[경고] SERVICE_KEY를 찾지 못했습니다. .env 파일 위치를 확인하세요: {_ENV_PATH}")
+
+
+def _safe_json(res: requests.Response, context: str = ""):
+    """API 응답이 JSON이 아닐 때 원인을 바로 알 수 있도록 원본 응답을 출력하고 에러를 다시 던진다."""
+    try:
+        return res.json()
+    except ValueError:
+        print(f"[API 응답 파싱 실패] {context}")
+        print(f"  status_code: {res.status_code}")
+        print(f"  url: {res.url}")
+        print(f"  응답 앞부분: {res.text[:300]}")
+        raise
 
 # 광주=5, 전남=38
 REGIONS = {"광주": "5", "전남": "38"}
@@ -37,7 +57,7 @@ def get_area_based_list_all(area_code, content_type_id=None, num_of_rows=100):
             params["contentTypeId"] = content_type_id
 
         res = requests.get(url, params=params)
-        data = res.json()
+        data = _safe_json(res, f"areaBasedList2 (area_code={area_code}, page={page_no})")
         body = data["response"]["body"]
 
         items = body.get("items", {})
@@ -87,7 +107,7 @@ def get_lcls_codes(lcls1=None, lcls2=None, num_of_rows=100):
         params["lclsSystm2"] = lcls2
 
     res = requests.get(url, params=params)
-    data = res.json()
+    data = _safe_json(res, f"lclsSystmCode2 (lcls1={lcls1}, lcls2={lcls2})")
 
     header = data.get("response", {}).get("header", {})
     if header.get("resultCode") != "0000":
@@ -127,7 +147,7 @@ def get_sigungu_map(area_code):
         "numOfRows": 100,
     }
     res = requests.get(url, params=params)
-    data = res.json()
+    data = _safe_json(res, f"areaCode2 (area_code={area_code})")
     items = data["response"]["body"]["items"]["item"]
     return {item["code"]: item["name"] for item in items}
 
