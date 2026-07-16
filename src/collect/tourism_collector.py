@@ -1,53 +1,142 @@
 """
-1) TourAPI(한국관광공사) 호출 - 광주/전남 관광지만
-2) 전국전통시장표준데이터 API 호출 - 광주/전남 전통시장만
+TourAPI(한국관광공사) 호출 담당 모듈
+- 관광지 목록 수집 (지역기반, 전체 페이지 순회)
+- 분류체계(lclsSystm) 코드-이름 매핑
+- 시군구 코드-이름 매핑
 """
 import os
 import requests
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv("../.env")  # 프로젝트 루트의 .env 사용 (notebooks/에서 실행 기준)
 
-SERVICE_KEY = os.getenv("SERVICE_KEY")  # TourAPI, 전통시장API 공통으로 사용
-
+SERVICE_KEY = os.getenv("SERVICE_KEY")
 TOUR_BASE_URL = "https://apis.data.go.kr/B551011/KorService2"
 
-# TourAPI 지역코드: 광주=5, 전남=38
+# 광주=5, 전남=38
 REGIONS = {"광주": "5", "전남": "38"}
 
 
-# ---------- 1) 관광지 API 호출 (광주/전남만) ----------
-def get_area_based_list(area_code, num_of_rows=10):
-    """지역코드로 관광지 목록 가져오기"""
-    url = f"{TOUR_BASE_URL}/areaBasedList2"
+# ---------- 1) 관광지 목록 수집 ----------
+def get_area_based_list_all(area_code, content_type_id=None, num_of_rows=100):
+    """지역기반 관광정보를 페이지 끝까지 순회하며 전체 가져오기"""
+    all_items = []
+    page_no = 1
+    while True:
+        url = f"{TOUR_BASE_URL}/areaBasedList2"
+        params = {
+            "serviceKey": SERVICE_KEY,
+            "MobileOS": "ETC",
+            "MobileApp": "MyApp",
+            "_type": "json",
+            "areaCode": area_code,
+            "numOfRows": num_of_rows,
+            "pageNo": page_no,
+        }
+        if content_type_id:
+            params["contentTypeId"] = content_type_id
+
+        res = requests.get(url, params=params)
+        data = res.json()
+        body = data["response"]["body"]
+
+        items = body.get("items", {})
+        items = items.get("item", []) if isinstance(items, dict) else []
+        if not items:
+            break
+
+        all_items.extend(items)
+        page_no += 1
+
+        if len(items) < num_of_rows:
+            break
+
+    return all_items
+
+
+def get_gwangju_jeonnam_attractions_all():
+    """광주 + 전남 전체 관광지 가져오기"""
+    all_attractions = []
+    for region_name, area_code in REGIONS.items():
+        items = get_area_based_list_all(area_code)
+        for item in items:
+            item["_region"] = region_name
+        all_attractions.extend(items)
+    return all_attractions
+
+
+# ---------- 2) 분류체계(lclsSystm) 코드-이름 매핑 ----------
+def get_lcls_codes(lcls1=None, lcls2=None, num_of_rows=100):
+    """
+    분류체계 코드-이름 조회
+    - 인자 없이 호출 -> 대분류 전체
+    - lcls1만 -> 중분류
+    - lcls1 + lcls2 -> 소분류
+    """
+    url = f"{TOUR_BASE_URL}/lclsSystmCode2"
+    params = {
+        "serviceKey": SERVICE_KEY,
+        "MobileOS": "ETC",
+        "MobileApp": "MyApp",
+        "_type": "json",
+        "numOfRows": num_of_rows,
+    }
+    if lcls1:
+        params["lclsSystm1"] = lcls1
+    if lcls2:
+        params["lclsSystm2"] = lcls2
+
+    res = requests.get(url, params=params)
+    data = res.json()
+
+    header = data.get("response", {}).get("header", {})
+    if header.get("resultCode") != "0000":
+        raise RuntimeError(f"API 에러: {header.get('resultCode')} - {header.get('resultMsg')}")
+
+    items = data["response"]["body"]["items"]["item"]
+    return {item["code"]: item["name"] for item in items}
+
+
+def build_full_lcls_mapping():
+    """대분류 -> 중분류 -> 소분류 전체 코드-이름 매핑표 생성"""
+    full_map = {}
+    lcls1_map = get_lcls_codes()
+    full_map.update(lcls1_map)
+
+    for lcls1_code in lcls1_map:
+        lcls2_map = get_lcls_codes(lcls1=lcls1_code)
+        full_map.update(lcls2_map)
+
+        for lcls2_code in lcls2_map:
+            lcls3_map = get_lcls_codes(lcls1=lcls1_code, lcls2=lcls2_code)
+            full_map.update(lcls3_map)
+
+    return full_map
+
+
+# ---------- 3) 시군구 코드-이름 매핑 ----------
+def get_sigungu_map(area_code):
+    """특정 광역지역(area_code)의 시군구 코드-이름 목록 조회"""
+    url = f"{TOUR_BASE_URL}/areaCode2"
     params = {
         "serviceKey": SERVICE_KEY,
         "MobileOS": "ETC",
         "MobileApp": "MyApp",
         "_type": "json",
         "areaCode": area_code,
-        "numOfRows": num_of_rows,
+        "numOfRows": 100,
     }
     res = requests.get(url, params=params)
     data = res.json()
     items = data["response"]["body"]["items"]["item"]
-    return items
+    return {item["code"]: item["name"] for item in items}
 
 
-def get_gwangju_jeonnam_attractions(num_of_rows=10):
-    """광주 + 전남 관광지를 합쳐서 반환"""
-    all_attractions = []
-    for region_name, area_code in REGIONS.items():
-        items = get_area_based_list(area_code, num_of_rows)
-        for item in items:
-            item["_region"] = region_name  # 어느 지역인지 표시
-        all_attractions.extend(items)
-    return all_attractions
-
-
-# ---------- 사용 예시 ----------
-if __name__ == "__main__":
-    print("=== 광주/전남 관광지 ===")
-    attractions = get_gwangju_jeonnam_attractions(num_of_rows=5)
-    for a in attractions:
-        print(f"[{a['_region']}]", a["title"], "-", a["addr1"])
+def build_full_sigungu_mapping():
+    """광주+전남 시군구 코드-이름 매핑표 (지역코드_시군구코드 형태로 합성 키 사용)"""
+    sigungu_full_map = {}
+    for area_code in REGIONS.values():
+        sigungu_map = get_sigungu_map(area_code)
+        for code, name in sigungu_map.items():
+            sigungu_full_map[f"{area_code}_{code}"] = name
+    return sigungu_full_map
